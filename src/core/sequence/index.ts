@@ -1,26 +1,8 @@
-type Task<A = any, R = any, E extends Error = Error> = (
-  arg: A,
-  next: (passValue: R | E) => void
-) => void;
-type ProgressStatus = Exclude<ControlTask['status'], 'pending'>;
+import { cloneList, microqueueTask } from '../../util/index.js';
+import * as error from './errorMessage.js';
+import { ControlTaskContext, SequenceOption, Task } from './types.js';
 
-const DELEGATE_CONTROL_ERROR =
-  'You can only delegate control within a function scope once';
-
-interface ControlTask {
-  status: 'pending' | 'executing' | 'complete';
-  arg: any;
-  task: Task;
-}
-
-interface SequenceOption<T> {
-  onsuccess: (finalResult: T) => void;
-  onerror?: <R>(reason: R) => void;
-}
-
-function cloneList<T>(list: Array<T>) {
-  return list.slice(0);
-}
+type ProgressStatus = Exclude<ControlTaskContext['status'], 'pending'>;
 
 function sequence<A, B, C>(
   controlFns: [Task<A, B>, Task<B, C>],
@@ -109,41 +91,59 @@ function sequence<A, B, C, D, F, E, G, H, I, J, K>(
 ): (initial: A) => void;
 
 function sequence(controlFns: Array<Task>, options: SequenceOption<any>) {
-  let currentTask: ControlTask | null = null;
-  let pendingTask: ControlTask | null = null;
-  const nonEnqueueTaskFns = cloneList(controlFns);
+  let currentTask: ControlTaskContext | null = null;
+  let pendingTask: ControlTaskContext | null = null;
+  const nonEnqueueTaskFns = cloneList(controlFns).reverse();
+  let erroredDuringControl = false;
 
-  function createTask(fn: Task, value: any): ControlTask {
+  function createTask(fn: Task, value: any): ControlTaskContext {
     return { task: fn, arg: value, status: 'pending' };
   }
 
-  function microqueueControlTask(queueTask: () => void) {
-    void queueMicrotask(queueTask);
+  function popNextTask() {
+    return nonEnqueueTaskFns.length
+      ? nonEnqueueTaskFns.pop()!
+      : options.onsuccess;
   }
 
-  function resume(value: unknown) {
+  function pendTask(task: Task, value: unknown) {
+    pendingTask = createTask(task, value);
+  }
+
+  function transferFlow(task: ControlTaskContext) {
+    if (!currentTask || task !== currentTask) {
+      shiftToCurrent(task, pendingTask === task);
+    }
+    microqueueTask(delegateControl);
+  }
+
+  function release(value?: unknown) {
     if (value instanceof Error) {
       return handleThrownError(value);
     }
+    if (pendingTask) return handleThrownError(error.DELEGATE_CONTROL_ERROR);
 
-    if (currentTask && currentTask.status === 'executing') {
-      if (pendingTask) throw new Error(DELEGATE_CONTROL_ERROR);
-      return void (pendingTask = createTask(nonEnqueueTaskFns.shift()!, value));
+    if (currentTask) {
+      switch (currentTask.status) {
+        case 'pending':
+          return handleThrownError(error.TASK_IN_PENDING_DURING_RELEASE_ERROR);
+
+        case 'executing':
+          return pendTask(popNextTask(), value);
+
+        case 'complete': {
+          return transferFlow(createTask(popNextTask(), value));
+        }
+      }
     }
-    const task = nonEnqueueTaskFns.length
-      ? nonEnqueueTaskFns.shift()!
-      : options.onsuccess;
-
-    currentTask = createTask(task, value);
-    microqueueControlTask(delegateControl);
   }
 
-  function markProgress(task: ControlTask, status: ProgressStatus) {
+  function markProgress(task: ControlTaskContext, status: ProgressStatus) {
     return void (task.status = status);
   }
 
   function scopeTaskProgress(
-    currentTask: ControlTask,
+    currentTask: ControlTaskContext,
     taskRunScope: () => void
   ) {
     markProgress(currentTask, 'executing');
@@ -151,50 +151,62 @@ function sequence(controlFns: Array<Task>, options: SequenceOption<any>) {
     markProgress(currentTask!, 'complete');
   }
 
-  function shiftToCurrent(task: ControlTask) {
+  function shiftToCurrent(task: ControlTaskContext, clearPending?: boolean) {
+    if (clearPending) pendingTask = null;
     currentTask = task;
-    pendingTask = null;
   }
 
   function throwErrorOnNextCycle(error: any) {
-    microqueueControlTask(() => {
+    microqueueTask(() => {
       throw error;
     });
   }
 
   function handleThrownError(e: any) {
+    erroredDuringControl = true;
     const { onerror } = options;
     if (onerror) return void onerror(e);
-    throwErrorOnNextCycle(e);
+    return void throwErrorOnNextCycle(e);
   }
 
   function delegateControl() {
-    if (currentTask && currentTask.status === 'pending') {
-      const { task, arg } = currentTask;
-      let erroredDuringControl = false;
+    if (erroredDuringControl) return;
 
-      scopeTaskProgress(currentTask!, function () {
-        try {
-          task(arg, resume);
-        } catch (e) {
-          handleThrownError(e);
-        } finally {
-          erroredDuringControl = true;
+    if (currentTask) {
+      switch (currentTask.status) {
+        case 'complete':
+        case 'executing': {
+          return handleThrownError(
+            error.CONTROL_DELEGATE_ERROR(currentTask.status)
+          );
         }
-      });
 
-      if (pendingTask && !erroredDuringControl) {
-        shiftToCurrent(pendingTask);
-        microqueueControlTask(delegateControl);
+        case 'pending': {
+          const { task, arg } = currentTask;
+          scopeTaskProgress(currentTask!, function () {
+            try {
+              task(arg, release);
+            } catch (e) {
+              handleThrownError(e);
+            } finally {
+              if (pendingTask) transferFlow(pendingTask);
+            }
+          });
+        }
       }
     }
   }
 
+  function initFlow(initial: any) {
+    const task = createTask(popNextTask(), initial);
+    return transferFlow(task);
+  }
+
   return function (initial: any) {
     if (!nonEnqueueTaskFns.length) {
-      throw new Error('Expected One or more sequencial fn, but got none');
+      throw new Error(error.MORE_FUNCTION_ERROR);
     }
-    return void resume(initial);
+    return initFlow(initial);
   };
 }
 export default sequence;

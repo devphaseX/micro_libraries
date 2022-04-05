@@ -189,7 +189,8 @@ function sequence(controlFns: Array<Task>, options: SequenceOption<any>) {
             } catch (e) {
               handleThrownError(e);
             } finally {
-              if (pendingTask) transferFlow(pendingTask);
+              if (pendingTask && !erroredDuringControl)
+                transferFlow(pendingTask);
             }
           });
         }

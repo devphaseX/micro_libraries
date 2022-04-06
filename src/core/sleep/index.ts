@@ -1,5 +1,5 @@
-import { timeout } from '../util/index.js';
-import sequence from '../core/sequence/index.js';
+import { timeout } from '../../util/index.js';
+import sequence from '../sequence/index.js';
 
 function sleep(ms: number, task: () => void) {
   let id = -1;

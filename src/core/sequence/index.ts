@@ -1,8 +1,11 @@
 import { cloneList, microqueueTask } from '../../util/index.js';
 import * as error from './errorMessage.js';
-import { ControlTaskContext, SequenceOption, Task } from './types.js';
-
-type ProgressStatus = Exclude<ControlTaskContext['status'], 'pending'>;
+import {
+  ControlTaskContext,
+  ContextError,
+  SequenceOption,
+  Task,
+} from './types.js';
 
 function sequence<A, B, C>(
   controlFns: [Task<A, B>, Task<B, C>],
@@ -91,9 +94,10 @@ function sequence<A, B, C, D, F, E, G, H, I, J, K>(
 ): (initial: A) => void;
 
 function sequence(controlFns: Array<Task>, options: SequenceOption<any>) {
+  controlFns = cloneList(controlFns);
   let currentTask: ControlTaskContext | null = null;
   let pendingTask: ControlTaskContext | null = null;
-  const nonEnqueueTaskFns = cloneList(controlFns).reverse();
+  let nonEnqueueTaskFns = cloneList(controlFns).reverse();
   let erroredDuringControl = false;
 
   function createTask(fn: Task, value: any): ControlTaskContext {
@@ -119,7 +123,17 @@ function sequence(controlFns: Array<Task>, options: SequenceOption<any>) {
 
   function release(value?: unknown) {
     if (value instanceof Error) {
-      return handleThrownError(value);
+      if (currentTask) {
+        const task = currentTask;
+        return mark(task, function (progress) {
+          progress(
+            task.status === 'executing'
+              ? 'erroredbeforesynccomplete'
+              : 'erroredaftersynccomplete',
+            value
+          );
+        });
+      }
     }
     if (pendingTask) return handleThrownError(error.DELEGATE_CONTROL_ERROR);
 
@@ -138,21 +152,28 @@ function sequence(controlFns: Array<Task>, options: SequenceOption<any>) {
     }
   }
 
-  function markProgress(task: ControlTaskContext, status: ProgressStatus) {
-    return void (task.status = status);
-  }
+  type ProgressMarkFn = (
+    mode: ControlTaskContext['status'],
+    errored?: any
+  ) => void;
 
-  function scopeTaskProgress(
-    currentTask: ControlTaskContext,
-    taskRunScope: () => void
+  function mark(
+    task: ControlTaskContext,
+    scoper: (progresser: ProgressMarkFn) => void
   ) {
-    markProgress(currentTask, 'executing');
-    taskRunScope();
-    markProgress(currentTask!, 'complete');
+    const progresser: ProgressMarkFn = function (mode, error) {
+      task.status = mode;
+      if (mode.includes('error')) {
+        return void handleThrownError(error);
+      }
+    };
+    scoper(progresser);
   }
 
   function shiftToCurrent(task: ControlTaskContext, clearPending?: boolean) {
-    if (clearPending) pendingTask = null;
+    if (clearPending) {
+      pendingTask = null;
+    }
     currentTask = task;
   }
 
@@ -165,8 +186,9 @@ function sequence(controlFns: Array<Task>, options: SequenceOption<any>) {
   function handleThrownError(e: any) {
     erroredDuringControl = true;
     const { onerror } = options;
-    if (onerror) return void onerror(e);
-    return void throwErrorOnNextCycle(e);
+    const error: ContextError = { error: e, task: currentTask! };
+    if (onerror) return void onerror(error);
+    return void throwErrorOnNextCycle(error);
   }
 
   function delegateControl() {
@@ -183,15 +205,15 @@ function sequence(controlFns: Array<Task>, options: SequenceOption<any>) {
 
         case 'pending': {
           const { task, arg } = currentTask;
-          scopeTaskProgress(currentTask!, function () {
+          mark(currentTask, function (progress) {
             try {
+              progress('executing');
               task(arg, release);
             } catch (e) {
-              handleThrownError(e);
-            } finally {
-              if (pendingTask && !erroredDuringControl)
-                transferFlow(pendingTask);
+              return progress('error', e);
             }
+            progress('complete');
+            if (pendingTask) transferFlow(pendingTask);
           });
         }
       }

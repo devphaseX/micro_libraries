@@ -5,3 +5,7 @@ export function cloneList<T>(list: Array<T>) {
 export function microqueueTask(queueTask: () => void) {
   void queueMicrotask(queueTask);
 }
+
+export function getSnapshot<V>(value: V): V {
+  return JSON.parse(JSON.stringify(value));
+}

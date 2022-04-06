@@ -3,7 +3,6 @@ export type ControlTaskContext = {
     | 'pending'
     | 'executing'
     | 'complete'
-    | 'error'
     | 'erroredaftersynccomplete'
     | 'erroredbeforesynccomplete';
   arg: any;

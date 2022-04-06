@@ -9,3 +9,10 @@ export function microqueueTask(queueTask: () => void) {
 export function getSnapshot<V>(value: V): V {
   return JSON.parse(JSON.stringify(value));
 }
+
+export function timeout(ms: number, task: () => void) {
+  const timerId = setTimeout(() => {
+    task();
+  }, ms);
+  return timerId;
+}

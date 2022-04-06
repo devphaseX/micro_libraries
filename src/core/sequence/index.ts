@@ -7,6 +7,10 @@ import {
   Task,
 } from './types.js';
 
+function sequence<A, B>(
+  controlFns: [Task<A, B>],
+  options: SequenceOption<B>
+): (initial: A) => void;
 function sequence<A, B, C>(
   controlFns: [Task<A, B>, Task<B, C>],
   options: SequenceOption<C>
@@ -196,8 +200,10 @@ function sequence(controlFns: Array<Task>, options: SequenceOption<any>) {
 
     if (currentTask) {
       switch (currentTask.status) {
+        case 'executing':
         case 'complete':
-        case 'executing': {
+        case 'erroredaftersynccomplete':
+        case 'erroredbeforesynccomplete': {
           return handleThrownError(
             error.CONTROL_DELEGATE_ERROR(currentTask.status)
           );
@@ -210,7 +216,7 @@ function sequence(controlFns: Array<Task>, options: SequenceOption<any>) {
               progress('executing');
               task(arg, release);
             } catch (e) {
-              return progress('error', e);
+              return progress('erroredaftersynccomplete', e);
             }
             progress('complete');
             if (pendingTask) transferFlow(pendingTask);

@@ -16,3 +16,7 @@ export function timeout(ms: number, task: () => void) {
   }, ms);
   return timerId;
 }
+
+export function getLastItem<T>(list: Array<T>): T | undefined {
+  return list.slice(-1)[0];
+}

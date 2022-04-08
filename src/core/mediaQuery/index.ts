@@ -1,161 +1,208 @@
-import { getLastItem } from '../../util/index.js';
-import createObservable, { Obervable } from '../observer/index.js';
+import createObservable, { Obervable } from '../../core/observer/index.js';
+import { getLastItem, noop, testEnvironmentSupport } from '../../util/index.js';
+createObservable;
 
-function mediaIsSupportInJS() {
-  return window && typeof window.matchMedia ? true : false;
-}
+type Dictionary = Record<PropertyKey, any>;
+type ObservableExt<T extends Dictionary, O> = T & { observable: Obervable<O> };
+type RuleStatus = StyleRule<boolean>['status'];
+type ScopeFnType = 'inline' | 'aggregate' | 'both';
+type RuleScope = { inline: ScopeFn<void>; aggregate: ScopeFn<void> };
 
-type MediaRule<T, P> = {
-  type: T;
-  params: P;
-  status: { self: boolean; aggregate: boolean };
-  scope?: (hasMatch: boolean) => void;
-  observable: Obervable<boolean>;
+type StyleRule<O> = {
+  rule: string;
+  status: { inline: boolean; aggregate: boolean };
+  observable: Obervable<O>;
+  scope: RuleScope;
 };
 
-interface Query {
-  min(type: 'width' | 'height', value: number): Omit<this, 'min'>;
-  max(type: 'width' | 'height', value: number): Omit<this, 'max'>;
+type ScopeFn<R> = (match: boolean) => R;
+type AggregateScopeFn = ScopeFn<void>;
+type InlineScopeFn = ScopeFn<AggregateScopeFn | void>;
+
+type SplitttedScoped = { type: ScopeFnType; rule: StyleRule<boolean> };
+
+function notifyRuleScope(
+  status: RuleStatus,
+  scopeRule: InlineScopeFn | SplitttedScoped | null,
+  invokeDirectly?: boolean
+) {
+  const scopeRuleIsObject = typeof scopeRule === 'object' && scopeRule !== null;
+
+  if (scopeRuleIsObject) {
+    const { scope } = scopeRule.rule;
+    return validRule(scopeRule.type, scope);
+  } else {
+    let splittedScopeFn: RuleScope = { inline: noop, aggregate: noop };
+
+    if (scopeRule !== null) {
+      const aggregateFn = scopeRule(status.inline);
+      splittedScopeFn.inline = scopeRule;
+      splittedScopeFn.aggregate = aggregateFn ?? noop;
+      validRule('aggregate', splittedScopeFn);
+    }
+
+    if (!invokeDirectly) {
+      return splittedScopeFn;
+    }
+  }
+
+  function validRule(
+    type: SplitttedScoped['type'],
+    scopeOption: RuleScope
+  ): void {
+    switch (type) {
+      case 'inline':
+      case 'aggregate':
+        const _scope = scopeOption[type];
+        return _scope === noop ? void 0 : scopeOption[type](status[type]);
+
+      case 'both': {
+        let _types: Array<Exclude<ScopeFnType, 'both'>> = [
+          'inline',
+          'aggregate',
+        ];
+
+        while (_types.length) {
+          const type = _types.shift()!;
+          validRule(type, scopeOption);
+        }
+      }
+    }
+  }
 }
 
-type RuleTrack = { mediaOption: MediaQueryList; observable: Obervable<any> };
+function trackRule<T>(
+  rule: string,
+  picker: (
+    media: ObservableExt<MediaQueryList, any>,
+    getFinalizedRule: () => ObservableExt<StyleRule<boolean>, any>
+  ) => ObservableExt<StyleRule<boolean>, any>,
+  register: (rule: ObservableExt<StyleRule<boolean>, any>) => T
+) {
+  const media = matchMedia(rule);
+  let prev = media.matches;
 
-function createRuleTrack(match: string): RuleTrack {
-  const mediaOption = window.matchMedia(match);
-  let prevState = mediaOption.matches;
-  const observable = createObservable<boolean>(function (next) {
-    mediaOption.addEventListener('change', function ({ matches }) {
-      if (prevState !== matches) {
-        prevState = matches;
-        next(matches);
-      }
+  const observable = createObservable(function (next) {
+    media.addEventListener('change', function ({ matches }) {
+      if (prev === matches) return;
+      prev = matches;
+      next(matches);
     });
   });
 
-  return { mediaOption, observable };
+  const finalRule = picker(Object.assign(media, { observable }), function () {
+    return finalRule;
+  });
+
+  return register(finalRule);
 }
 
-function ruleHasMatch(rules: Array<{ state: boolean }>) {
-  return rules.every((rule) => rule.state);
-}
-
-function revalidateRule(
-  rule: Omit<MediaRule<any, any>, 'observable'>,
-  track: RuleTrack
-) {
-  return {
-    ...rule,
-    observable: track.observable,
-    state: track.mediaOption.matches,
-  };
-}
-
-class CSSMediaquery implements Query {
-  #rules: MediaRule<any, any>[] = [];
-  private static supported: boolean;
+class CSSQuery {
+  static supportMedia: boolean;
+  #styleRules: Array<StyleRule<boolean>> = [];
 
   static {
-    this.supported = mediaIsSupportInJS();
+    this.supportMedia = testEnvironmentSupport(() => {
+      matchMedia('()');
+    });
   }
 
   constructor() {
-    if (!CSSMediaquery.supported) {
-      throw new Error('match media isn"t supported on the environment');
+    if (!CSSQuery.supportMedia) {
+      throw new Error();
     }
   }
 
-  #setRule<T, P>(rule: MediaRule<T, P>) {
-    this.#rules.push(rule);
+  #addRule(rule: StyleRule<boolean>) {
+    this.#styleRules.push(rule);
   }
 
-  hasRule(type: any) {
-    return this.#rules.find((rule) => rule.type === type);
-  }
-
-  guardRule(type: any, guard: () => void) {
-    if (!CSSMediaquery.supported) {
-      throw new TypeError('match media isn"t supported on the environment');
+  #lockAccess(requester: () => void) {
+    if (CSSQuery.supportMedia) {
+      requester();
     }
-    if (this.hasRule(type)) {
-      throw new TypeError();
-    }
-    return guard(), this;
+    return this;
   }
 
-  min(
-    type: 'width' | 'height',
-    value: number,
-    scope?: (isMatch: boolean) => void
-  ) {
-    let fullType = 'min-'.concat(type);
-    return this.registerRule({
-      type: fullType,
-      params: value + 'px',
-      status: { self: false, aggregate: false },
-      scope,
-    });
+  #getLastAggregateRule() {
+    return getLastItem(this.#styleRules) ?? null;
   }
 
-  max(type: 'width' | 'height', value: number, scope?: () => void) {
-    let fullType = 'max-'.concat(type);
-    return this.registerRule({
-      type: fullType,
-      params: value + 'px',
-      status: { self: false, aggregate: false },
-      scope,
-    });
-  }
+  validate(scope: ScopeFn<void>) {
+    if (!this.#styleRules.length) throw new Error();
 
-  scope(mediaScope: (hasMatch: boolean) => void) {
-    if (!this.#rules.length) throw new TypeError();
-    const finalRule = getLastItem(this.#rules)!;
-    finalRule.observable.observe(mediaScope);
-  }
+    return void this.#lockAccess(() => {
+      const finalRule = getLastItem(this.#styleRules)!;
+      notifyRuleScope({ ...finalRule.status }, scope, true);
 
-  registerRule(rule: Omit<MediaRule<any, any>, 'observable' | 'match'>) {
-    const ruleTrack = createRuleTrack(`(${rule.type}: ${rule.params})`);
-    let observable = ruleTrack.observable;
-    const fullRule = revalidateRule(rule, ruleTrack);
-
-    function invokeInlineMatch() {
-      if (rule.scope) {
-        rule.scope(rule.status.self);
-      }
-    }
-
-    if (this.#rules.length) {
-      const preceedRule = getLastItem(this.#rules)!;
-
-      if (preceedRule) {
-        observable = createObservable<any>(function (next) {
-          ruleTrack.observable.observe(function (value) {
-            rule.status.self = value;
-            rule.status.aggregate = preceedRule.status.aggregate && value;
-            next(value);
-          });
-          preceedRule.observable.observe(function (value) {
-            rule.status.aggregate = value && rule.status.self;
-            next(value);
-          });
-        });
-
-        observable.observe(invokeInlineMatch);
-      }
-    } else {
-      ruleTrack.observable.observe(function (value) {
-        rule.status = { self: value, aggregate: value };
-        invokeInlineMatch();
+      finalRule.observable.observe(() => {
+        notifyRuleScope({ ...finalRule.status }, scope, true);
       });
-    }
-
-    if (rule.scope) {
-      rule.scope(fullRule.state);
-    }
-
-    return this.guardRule(rule.type, () => {
-      this.#setRule(fullRule);
     });
+  }
+
+  createRule(rule: string, scope?: InlineScopeFn): this {
+    const register = (rule: ObservableExt<StyleRule<boolean>, any>) => {
+      return this.#lockAccess(() => {
+        this.#addRule(rule);
+      });
+    };
+
+    return trackRule(
+      rule,
+      ({ matches, observable }, getFinalRule) => {
+        const aggregate = this.#getLastAggregateRule();
+
+        if (aggregate) {
+          let inlineObservable = observable;
+          observable = createObservable<{ type: ScopeFnType }>(function (next) {
+            inlineObservable.observe(function (match) {
+              const selfRule = getFinalRule();
+              selfRule.status.inline = match;
+              selfRule.status.aggregate = match && aggregate.status.aggregate;
+              next({ type: 'both' });
+            });
+
+            aggregate.observable.observe(function (match) {
+              const selfRule = getFinalRule();
+              selfRule.status.aggregate = match && aggregate.status.aggregate;
+              next({ type: 'aggregate' });
+            });
+          });
+
+          observable.observe(({ type }: { type: ScopeFnType }) => {
+            const selfRule = getFinalRule();
+            notifyRuleScope({ ...selfRule.status }, { type, rule: selfRule });
+          });
+        } else {
+          observable.observe(function (match) {
+            const selfRule = getFinalRule();
+            selfRule.status = { inline: match, aggregate: match };
+            notifyRuleScope(
+              { ...selfRule.status },
+              { type: 'inline', rule: selfRule }
+            );
+          });
+        }
+
+        const status = {
+          inline: matches,
+          aggregate:
+            (aggregate && aggregate.status.aggregate && matches) ?? matches,
+        };
+
+        const scopeFn = notifyRuleScope(status, scope ?? null)!;
+
+        return {
+          rule,
+          status,
+          observable,
+          scope: scopeFn,
+        };
+      },
+      register
+    );
   }
 }
 
-export default CSSMediaquery;
+export default CSSQuery;

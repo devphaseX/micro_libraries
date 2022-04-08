@@ -20,3 +20,15 @@ export function timeout(ms: number, task: () => void) {
 export function getLastItem<T>(list: Array<T>): T | undefined {
   return list.slice(-1)[0];
 }
+
+export function testEnvironmentSupport(tester: () => void) {
+  let isSupported = true;
+  try {
+    tester();
+  } catch {
+    isSupported = false;
+  }
+  return isSupported;
+}
+
+export function noop() {}

@@ -2,8 +2,9 @@ import { noop } from '../../util/index.js';
 
 type Observer<V> = (value: V) => void;
 type Mappable<T, U> = (value: T) => U;
+type SideEffectFn = () => void;
 
-type TerminateOption = { stop: () => void; unsubscribe: () => void };
+type TerminateOption = { stop: SideEffectFn; unsubscribe: SideEffectFn };
 
 export type Obervable<T> = {
   from<U>(fn: Mappable<T, U>): Obervable<U>;

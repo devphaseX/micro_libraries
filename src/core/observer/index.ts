@@ -48,6 +48,7 @@ function createObservable<T>(
   function pipe<A, B, C>(observableCreators: [Mappable<A, B>, Mappable<B, C>]) {
     return createObservable<T>((next, _r1) => {
       let observable: Obervable<any> = _self;
+      let _internalObserverFnIndex = subscriber.length - 1;
 
       observableCreators.forEach((mapFn) => {
         let lastObservable = observable;
@@ -57,8 +58,13 @@ function createObservable<T>(
           });
 
           _r2(function () {
-            if (lastObservable.observe !== observe) {
+            if (
+              lastObservable !== _self ||
+              lastObservable.observe !== _self.observe
+            ) {
               lastObservable.stop();
+            } else {
+              subscriber.splice(_internalObserverFnIndex, 1);
             }
           });
         });

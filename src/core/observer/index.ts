@@ -21,11 +21,11 @@ function createObservable<T>(
 
   function from<U>(map: Mappable<T, U>) {
     return createObservable<U>((next, reset) => {
-      const terminateOption = observe((value) => {
+      const { unsubscribe } = observe((value) => {
         next(map(value));
       });
       reset(function () {
-        terminateOption.unsubscribe();
+        unsubscribe();
       });
     });
   }
@@ -69,14 +69,10 @@ function createObservable<T>(
       observableCreators.forEach((mapFn) => {
         let prevObservable = observable;
         observable = createObservable(function (next, _r2) {
-          const terminateOption = prevObservable.observe(subscriber);
+          const { stop, unsubscribe } = prevObservable.observe(subscriber);
 
           _r2(function () {
-            if (prevObservable !== _self) {
-              prevObservable.stop();
-            } else {
-              terminateOption.unsubscribe();
-            }
+            return void (prevObservable !== _self ? stop() : unsubscribe());
           });
 
           function subscriber(value: any) {

@@ -45,10 +45,14 @@ function createObservable<T>(
     subscriber.push(notifier);
   }
 
+  function _getObserverEntryAddress() {
+    return subscriber.length;
+  }
+
   function pipe<A, B, C>(observableCreators: [Mappable<A, B>, Mappable<B, C>]) {
     return createObservable<T>((next, _r1) => {
       let observable: Obervable<any> = _self;
-      let _internalObserverFnIndex = subscriber.length - 1;
+      let _internalObserverFnIndex = _getObserverEntryAddress();
 
       observableCreators.forEach((mapFn) => {
         let lastObservable = observable;

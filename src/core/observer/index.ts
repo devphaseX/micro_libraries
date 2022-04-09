@@ -58,10 +58,7 @@ function createObservable<T>(
           });
 
           _r2(function () {
-            if (
-              lastObservable !== _self ||
-              lastObservable.observe !== _self.observe
-            ) {
+            if (lastObservable !== _self) {
               lastObservable.stop();
             } else {
               subscriber.splice(_internalObserverFnIndex, 1);

@@ -1,12 +1,12 @@
 import createObservable, { Obervable } from '../../core/observer/index.js';
 import { getLastItem, noop, testEnvironmentSupport } from '../../util/index.js';
-createObservable;
 
 type Dictionary = Record<PropertyKey, any>;
 type ObservableExt<T extends Dictionary, O> = T & { observable: Obervable<O> };
 type RuleStatus = StyleRule<boolean>['status'];
 type ScopeFnType = 'inline' | 'aggregate' | 'both';
 type RuleScope = { inline: ScopeFn<void>; aggregate: ScopeFn<void> };
+type ScopeFnTypeObject = { type: ScopeFnType };
 
 type StyleRule<O> = {
   rule: string;
@@ -75,18 +75,23 @@ function trackRule<T>(
   rule: string,
   picker: (
     media: ObservableExt<MediaQueryList, any>,
-    getFinalizedRule: () => ObservableExt<StyleRule<boolean>, any>
-  ) => ObservableExt<StyleRule<boolean>, any>,
-  register: (rule: ObservableExt<StyleRule<boolean>, any>) => T
+    getFinalizedRule: () => StyleRule<boolean>
+  ) => StyleRule<boolean>,
+  register: (rule: StyleRule<boolean>) => T
 ) {
   const media = matchMedia(rule);
   let prev = media.matches;
 
-  const observable = createObservable(function (next) {
-    media.addEventListener('change', function ({ matches }) {
+  const observable = createObservable(function (next, reset) {
+    function queryHandler({ matches }: MediaQueryListEvent) {
       if (prev === matches) return;
       prev = matches;
       next(matches);
+    }
+    media.addEventListener('change', queryHandler);
+
+    reset(function () {
+      media.removeEventListener('change', queryHandler);
     });
   });
 
@@ -141,6 +146,13 @@ class CSSQuery {
     });
   }
 
+  disconnect() {
+    this.#styleRules.forEach(({ observable }) => {
+      observable.stop();
+    });
+    this.#styleRules = [];
+  }
+
   createRule(rule: string, scope?: InlineScopeFn): this {
     const register = (rule: ObservableExt<StyleRule<boolean>, any>) => {
       return this.#lockAccess(() => {
@@ -155,7 +167,10 @@ class CSSQuery {
 
         if (aggregate) {
           let inlineObservable = observable;
-          observable = createObservable<{ type: ScopeFnType }>(function (next) {
+          observable = createObservable<ScopeFnTypeObject>(function (
+            next,
+            reset
+          ) {
             inlineObservable.observe(function (match) {
               const selfRule = getFinalRule();
               selfRule.status.inline = match;
@@ -167,6 +182,10 @@ class CSSQuery {
               const selfRule = getFinalRule();
               selfRule.status.aggregate = match && aggregate.status.aggregate;
               next({ type: 'aggregate' });
+            });
+
+            reset(function () {
+              inlineObservable.stop();
             });
           });
 

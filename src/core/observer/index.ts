@@ -1,13 +1,21 @@
+import { noop } from '../../util/index.js';
+
 type Observer<V> = (value: V) => void;
 type Mappable<T, U> = (value: T) => U;
 
 export type Obervable<T> = {
   from<U>(fn: Mappable<T, U>): Obervable<U>;
   observe(notifier: Observer<T>): void;
+  stop(): void;
 };
 
-function createObservable<T>(observable: (next: Observer<T>) => void) {
-  const subsriber: Array<Observer<T>> = [];
+type CleanupFn = (reset: () => void) => void;
+
+function createObservable<T>(
+  observable: (next: Observer<T>, cleanup: CleanupFn) => void
+) {
+  let subscriber: Array<Observer<T>> = [];
+  let _resetInternalFn: null | (() => void) = null;
 
   function from<U>(map: Mappable<T, U>) {
     return createObservable<U>((next) => {
@@ -17,38 +25,62 @@ function createObservable<T>(observable: (next: Observer<T>) => void) {
     });
   }
 
-  function notify(value: T) {
-    subsriber.forEach((subsriber) => {
+  let notify = function (value: T) {
+    subscriber.forEach((subsriber) => {
       subsriber(value);
     });
-  }
+  };
 
   function observe(notifier: Observer<T>) {
-    if (subsriber.length === 0) {
-      observable(notify);
+    if (subscriber.length === 0) {
+      observable(
+        function (value: T) {
+          notify(value);
+        },
+        function (reset) {
+          _resetInternalFn = reset;
+        }
+      );
     }
-    subsriber.push(notifier);
+    subscriber.push(notifier);
   }
 
-  function pipe<A, B, C>(observaleCreators: [Mappable<A, B>, Mappable<B, C>]) {
-    return createObservable<T>((next) => {
-      let observable!: Obervable<any>;
-      let prevObserver: Obervable<any>['observe'] = observe;
+  function pipe<A, B, C>(observableCreators: [Mappable<A, B>, Mappable<B, C>]) {
+    return createObservable<T>((next, _r1) => {
+      let observable: Obervable<any> = _self;
 
-      observaleCreators.forEach((mapFn) => {
-        let lastObserver = prevObserver;
-        observable = createObservable(function (next) {
-          lastObserver(function (value) {
+      observableCreators.forEach((mapFn) => {
+        let lastObservable = observable;
+        observable = createObservable(function (next, _r2) {
+          lastObservable.observe(function (value) {
             next(mapFn(value));
           });
+
+          _r2(function () {
+            lastObservable.stop();
+          });
         });
+      });
+
+      _r1(function () {
+        observable.stop();
       });
 
       observable.observe(next);
     });
   }
 
-  return { from, observe, pipe };
+  function stop() {
+    notify = noop;
+    if (_resetInternalFn) {
+      _resetInternalFn();
+      _resetInternalFn = null;
+    }
+    subscriber = [];
+  }
+
+  const _self = { from, observe, pipe, stop };
+  return _self;
 }
 
 export default createObservable;

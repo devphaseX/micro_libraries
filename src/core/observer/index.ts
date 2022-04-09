@@ -65,14 +65,15 @@ function createObservable<T>(
   ) {
     return createObservable<T>((next, _r1) => {
       let observable: Obervable<any> = _self;
+      let _internalObserve = observe;
 
       observableCreators.forEach((mapFn) => {
-        let prevObservable = observable;
+        let { observe } = observable;
         observable = createObservable(function (next, _r2) {
-          const { stop, unsubscribe } = prevObservable.observe(subscriber);
+          const { stop, unsubscribe } = observe(subscriber);
 
           _r2(function () {
-            return void (prevObservable !== _self ? stop() : unsubscribe());
+            return void (observe !== _internalObserve ? stop() : unsubscribe());
           });
 
           function subscriber(value: any) {

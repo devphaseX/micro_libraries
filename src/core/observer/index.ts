@@ -3,9 +3,11 @@ import { noop } from '../../util/index.js';
 type Observer<V> = (value: V) => void;
 type Mappable<T, U> = (value: T) => U;
 
+type TerminateOption = { stop: () => void; unsubscribe: () => void };
+
 export type Obervable<T> = {
   from<U>(fn: Mappable<T, U>): Obervable<U>;
-  observe(notifier: Observer<T>): void;
+  observe(notifier: Observer<T>): TerminateOption;
   stop(): void;
 };
 
@@ -14,25 +16,28 @@ type CleanupFn = (reset: () => void) => void;
 function createObservable<T>(
   observable: (next: Observer<T>, cleanup: CleanupFn) => void
 ) {
-  let subscriber: Array<Observer<T>> = [];
+  let subscribers: Array<Observer<T>> = [];
   let _resetInternalFn: null | (() => void) = null;
 
   function from<U>(map: Mappable<T, U>) {
-    return createObservable<U>((next) => {
-      observe((value) => {
+    return createObservable<U>((next, reset) => {
+      const terminateOption = observe((value) => {
         next(map(value));
+      });
+      reset(function () {
+        terminateOption.unsubscribe();
       });
     });
   }
 
   let notify = function (value: T) {
-    subscriber.forEach((subsriber) => {
+    subscribers.forEach((subsriber) => {
       subsriber(value);
     });
   };
 
-  function observe(notifier: Observer<T>) {
-    if (subscriber.length === 0) {
+  function observe(notifier: Observer<T>): TerminateOption {
+    if (subscribers.length === 0) {
       observable(
         function (value: T) {
           notify(value);
@@ -42,32 +47,41 @@ function createObservable<T>(
         }
       );
     }
-    subscriber.push(notifier);
+    subscribers.push(notifier);
+
+    function unsubscribe() {
+      _removeSubscriber(notifier);
+    }
+    return { unsubscribe, stop };
   }
 
-  function _getObserverEntryAddress() {
-    return subscriber.length;
+  function _removeSubscriber(subscriber: Observer<T>) {
+    subscribers = subscribers.filter((_sub) => _sub !== subscriber);
+    if (!subscribers.length) stop();
   }
 
-  function pipe<A, B, C>(observableCreators: [Mappable<A, B>, Mappable<B, C>]) {
+  function pipe<A, B, C>(
+    ...observableCreators: [Mappable<A, B>, Mappable<B, C>]
+  ) {
     return createObservable<T>((next, _r1) => {
       let observable: Obervable<any> = _self;
-      let _internalObserverFnIndex = _getObserverEntryAddress();
 
       observableCreators.forEach((mapFn) => {
-        let lastObservable = observable;
+        let prevObservable = observable;
         observable = createObservable(function (next, _r2) {
-          lastObservable.observe(function (value) {
-            next(mapFn(value));
-          });
+          const terminateOption = prevObservable.observe(subscriber);
 
           _r2(function () {
-            if (lastObservable !== _self) {
-              lastObservable.stop();
+            if (prevObservable !== _self) {
+              prevObservable.stop();
             } else {
-              subscriber.splice(_internalObserverFnIndex, 1);
+              terminateOption.unsubscribe();
             }
           });
+
+          function subscriber(value: any) {
+            next(mapFn(value));
+          }
         });
       });
 
@@ -85,10 +99,10 @@ function createObservable<T>(
       _resetInternalFn();
       _resetInternalFn = null;
     }
-    subscriber = [];
+    subscribers = [];
   }
 
-  const _self = { from, observe, pipe, stop };
+  const _self = { from, observe, pipe, stop } as Obervable<T>;
   return _self;
 }
 

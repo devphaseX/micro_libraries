@@ -57,7 +57,9 @@ function createObservable<T>(
           });
 
           _r2(function () {
-            lastObservable.stop();
+            if (lastObservable.observe !== observe) {
+              lastObservable.stop();
+            }
           });
         });
       });

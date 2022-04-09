@@ -138,11 +138,12 @@ class CSSQuery {
 
     return void this.#lockAccess(() => {
       const finalRule = getLastItem(this.#styleRules)!;
-      notifyRuleScope({ ...finalRule.status }, scope, true);
-
-      finalRule.observable.observe(() => {
+      notifyFinalScope();
+      function notifyFinalScope() {
         notifyRuleScope({ ...finalRule.status }, scope, true);
-      });
+      }
+
+      finalRule.observable.observe(notifyFinalScope);
     });
   }
 

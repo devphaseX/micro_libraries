@@ -32,3 +32,76 @@ export function testEnvironmentSupport(tester: () => void) {
 }
 
 export function noop() {}
+
+type QueuedItem<T> = { value: T; next: QueuedItem<T> | null };
+
+type QueueRoot<T> = {
+  head: QueuedItem<T> | null;
+  tail: QueuedItem<T> | null;
+  count: number;
+};
+
+export function createMiniQueue<T>(value?: T) {
+  const root: QueueRoot<T> = {
+    head: null,
+    tail: null,
+    count: 0,
+  };
+
+  function createItem(value: T) {
+    return { value, next: null };
+  }
+
+  if (value) {
+    root.head = root.tail = createItem(value);
+  }
+
+  return {
+    dequeue: function () {
+      const head = root.head;
+      if (!head) return null;
+
+      if (head.next === null) {
+        root.head = root.tail = null;
+      } else {
+        root.head = head.next;
+      }
+      root.count--;
+      return head.value;
+    },
+    enqueue: function (value: T) {
+      const prevTail = root.tail;
+      if (prevTail === null) {
+        root.tail = root.head = createItem(value);
+      } else {
+        prevTail.next = createItem(value);
+        root.tail = prevTail.next;
+      }
+      root.count++;
+    },
+
+    isEmpty() {
+      return root.head === null;
+    },
+
+    get size() {
+      return root.count;
+    },
+  };
+}
+
+export const MAX_ARRAY_SIZE = 2 * 32 - 1;
+
+export function selfRefence<T>(resulter: (ref: () => T) => T) {
+  let isRefAvailable = false;
+  const res = resulter(function () {
+    if (!isRefAvailable) {
+      throw new Error(
+        `Cannot use self reference during during selfReference function execution.`
+      );
+    }
+    return res;
+  });
+  isRefAvailable = true;
+  return res;
+}

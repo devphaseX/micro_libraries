@@ -1,5 +1,13 @@
-import createObservable, { Obervable } from '../../core/observer/index.js';
-import { getLastItem, noop, testEnvironmentSupport } from '../../util/index.js';
+import createObservable, {
+  linkObservable,
+  Obervable,
+} from '../../core/observer/index.js';
+import {
+  getLastItem,
+  noop,
+  selfRefence,
+  testEnvironmentSupport,
+} from '../../util/index.js';
 
 type Dictionary = Record<PropertyKey, any>;
 type ObservableExt<T extends Dictionary, O> = T & { observable: Obervable<O> };
@@ -82,7 +90,7 @@ function trackRule<T>(
   const media = matchMedia(rule);
   let prev = media.matches;
 
-  const observable = createObservable(function (next, reset) {
+  const observable = createObservable<boolean>(function (next, reset) {
     function queryHandler({ matches }: MediaQueryListEvent) {
       if (prev === matches) return;
       prev = matches;
@@ -95,9 +103,9 @@ function trackRule<T>(
     });
   });
 
-  const finalRule = picker(Object.assign(media, { observable }), function () {
-    return finalRule;
-  });
+  const finalRule = selfRefence<StyleRule<any>>((ref) =>
+    picker(Object.assign(media, { observable }), ref)
+  );
 
   return register(finalRule);
 }
@@ -168,22 +176,28 @@ class CSSQuery {
 
         if (aggregate) {
           let inlineObservable = observable;
-          observable = createObservable<ScopeFnTypeObject>(function (
-            next,
-            reset
-          ) {
-            inlineObservable.observe(function (match) {
-              const selfRule = getFinalRule();
-              selfRule.status.inline = match;
-              selfRule.status.aggregate = match && aggregate.status.aggregate;
-              next({ type: 'both' });
-            });
 
-            aggregate.observable.observe(function (match) {
-              const selfRule = getFinalRule();
-              selfRule.status.aggregate = match && aggregate.status.aggregate;
-              next({ type: 'aggregate' });
-            });
+          observable = linkObservable<ScopeFnTypeObject>(function (
+            next,
+            reset,
+            { _markObInternal }
+          ) {
+            inlineObservable.observe(
+              _markObInternal(function (match: boolean) {
+                const selfRule = getFinalRule();
+                selfRule.status.inline = match;
+                selfRule.status.aggregate = match && aggregate.status.aggregate;
+                next({ type: 'both' });
+              })
+            );
+
+            aggregate.observable.observe(
+              _markObInternal(function (match: boolean) {
+                const selfRule = getFinalRule();
+                selfRule.status.aggregate = match && aggregate.status.aggregate;
+                next({ type: 'aggregate' });
+              })
+            );
 
             reset(function () {
               inlineObservable.stop();

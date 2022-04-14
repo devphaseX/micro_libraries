@@ -113,6 +113,7 @@ function createObservable<T>(observable: ObservableFn<T>) {
 
     _subscribers.subsriberEntries.add(ob);
     //@ts-ignore
+    //valueof() unwrapped the real observer fn provided during observe time
     _subscribers[type].set(ob.valueOf(), ob);
     return selfRefence<TerminateOption>((ref) => {
       function revokeAccess() {
@@ -176,11 +177,17 @@ function createObservable<T>(observable: ObservableFn<T>) {
     if (value instanceof Error) {
       return _stop(true);
     } else {
+      batchNofication(value);
+    }
+  };
+
+  function batchNofication(value: T) {
+    Promise.resolve().then(() => {
       _subscribers.subsriberEntries.forEach((subscriber) => {
         subscriber(value);
       });
-    }
-  };
+    });
+  }
 
   function observe(
     notifier: Observer<T> | MarkObserveFn<T, MARK_OBSERVER_TYPE>

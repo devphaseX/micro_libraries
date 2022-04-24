@@ -4,6 +4,7 @@ import createObservable, {
 } from '../../core/observer/index.js';
 import {
   getLastItem,
+  isFunction,
   noop,
   selfRefence,
   testEnvironmentSupport,
@@ -45,7 +46,7 @@ function notifyRuleScope(
     if (scopeRule !== null) {
       const aggregateFn = scopeRule(status.inline);
       splittedScopeFn.inline = scopeRule;
-      splittedScopeFn.aggregate = aggregateFn ?? noop;
+      splittedScopeFn.aggregate = isFunction(aggregateFn) ? aggregateFn : noop;
       validRule('aggregate', splittedScopeFn);
     }
 

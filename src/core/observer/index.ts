@@ -1,4 +1,4 @@
-import { createMiniQueue, noop, selfRefence } from '../../util/index.js';
+import { createDataQueue, noop, selfRefence } from '../../util/index.js';
 import { ErrorMessage } from './message.js';
 
 type Observer<V> = (value: V) => void;
@@ -145,27 +145,29 @@ function createObservable<T>(observable: ObservableFn<T>) {
 
   function from<U>(map: (value: T, next: Observer<U>) => void) {
     return createObservable<U>((next, reset, { _markObInternal }) => {
-      const queue = createMiniQueue<T>();
+      const queue = createDataQueue<T>();
       let isLocked = false;
 
       const { unsubscribe } = observe(
         _markObInternal<T>(function (value) {
           if (!isLocked) {
             isLocked = true;
+
             map(value, function _next(value: U) {
               next(value);
               isLocked = false;
 
               if (!queue.isEmpty()) {
                 isLocked = true;
-                map(queue.dequeue()!, _next);
+                map(queue.pop()!, _next);
               }
             });
           } else {
-            queue.enqueue(value);
+            queue.push(value);
           }
 
           reset(function () {
+            queue.clear();
             unsubscribe();
           });
         })

@@ -105,3 +105,50 @@ export function selfRefence<T>(resulter: (ref: () => T) => T) {
   isRefAvailable = true;
   return res;
 }
+
+type Task = () => void;
+
+export function createDataQueue<T>() {
+  let queue: Set<T> = new Set();
+
+  function push(value: T) {
+    if (!queue.has(value)) {
+      queue.add(value);
+    }
+  }
+
+  function pop(): T | undefined {
+    const [nextTask] = queue;
+    _removeTask(nextTask);
+    return nextTask;
+  }
+
+  function _removeTask(value: T) {
+    queue.delete(value);
+  }
+
+  function clear() {
+    queue.forEach(_removeTask);
+  }
+
+  return {
+    pop,
+    push,
+    clear,
+    isEmpty: function () {
+      return queue.size === 0;
+    },
+  };
+}
+
+export function nativeTaskQueuer(task: Task) {
+  Promise.resolve()
+    .then(() => task())
+    .catch(noop);
+}
+
+type NonEmpty<T> = Exclude<T, undefined | void | null>;
+
+export function isFunction<T>(value: T): value is NonEmpty<T> {
+  return typeof value === 'function';
+}

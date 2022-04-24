@@ -3,13 +3,13 @@ import sequence from '../sequence/index.js';
 
 function sleep(ms: number, task: () => void) {
   let id = -1;
+
   function release() {
-    task();
-  }
-  function cancel() {
     clearInterval(id);
     id = -1;
+    task();
   }
+
   sequence(
     [
       function delay(ms: number, next) {
@@ -21,7 +21,7 @@ function sleep(ms: number, task: () => void) {
     { onsuccess: release }
   )(ms);
 
-  return cancel;
+  return release;
 }
 
 export default sleep;

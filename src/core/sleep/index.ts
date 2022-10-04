@@ -15,7 +15,7 @@ function sleep(ms: number, task: () => void) {
       function delay(ms: number, next) {
         id = timeout(ms, function () {
           next(null);
-        });
+        }) as unknown as number;
       },
     ],
     { onsuccess: release }

@@ -91,7 +91,7 @@ function trackRule<T>(
   const media = matchMedia(rule);
   let prev = media.matches;
 
-  const observable = createObservable<boolean>(function (next, reset) {
+  const observable = createObservable<boolean>(function (next) {
     function queryHandler({ matches }: MediaQueryListEvent) {
       if (prev === matches) return;
       prev = matches;
@@ -99,9 +99,9 @@ function trackRule<T>(
     }
     media.addEventListener('change', queryHandler);
 
-    reset(function () {
+    return function () {
       media.removeEventListener('change', queryHandler);
-    });
+    };
   });
 
   const finalRule = selfRefence<StyleRule<any>>((ref) =>
@@ -180,7 +180,7 @@ class CSSQuery {
 
           observable = linkObservable<ScopeFnTypeObject>(function (
             next,
-            reset,
+            __,
             { _markObInternal }
           ) {
             inlineObservable.observe(
@@ -200,9 +200,9 @@ class CSSQuery {
               })
             );
 
-            reset(function () {
+            return function () {
               inlineObservable.stop();
-            });
+            };
           });
 
           observable.observe(({ type }: { type: ScopeFnType }) => {

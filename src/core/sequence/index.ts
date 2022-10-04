@@ -98,7 +98,6 @@ function sequence<A, B, C, D, F, E, G, H, I, J, K>(
 ): (initial: A) => void;
 
 function sequence(controlFns: Array<Task>, options: SequenceOption<any>) {
-  controlFns = cloneList(controlFns);
   let currentTask: ControlTaskContext | null = null;
   let pendingTask: ControlTaskContext | null = null;
   let nonEnqueueTaskFns = cloneList(controlFns).reverse();

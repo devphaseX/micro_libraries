@@ -1,4 +1,9 @@
-import { createDataQueue, noop, selfRefence } from '../../util/index.js';
+import {
+  createDataQueue,
+  microQueueTaskNative,
+  noop,
+  selfRefence,
+} from '../../util/index.js';
 import { ErrorMessage } from './message.js';
 
 type Observer<V> = (value: V) => void;
@@ -8,17 +13,20 @@ type SideEffectFn = () => void;
 type TerminateOption = { stop: SideEffectFn; unsubscribe: SideEffectFn };
 
 export type Obervable<T> = {
-  from<U>(fn: Mappable<T, U>): Obervable<U>;
+  from<U>(fn: MappableObserver<T, U>): Obervable<U>;
   observe(notifier: Observer<T>): TerminateOption;
   stop(): void;
 };
 
-type CleanupFn = (reset: VoidFunction) => void;
+type MappableObserver<T, U> = (value: T, ob: Observer<U>) => void;
+
+type CleanupScopeFn = (reset: CleanUpFn) => void;
+type CleanUpFn = VoidFunction;
 type ObservableFn<T> = (
   next: Observer<T>,
-  cleanup: CleanupFn,
+  cleanup: CleanupScopeFn,
   option: { _markObInternal: <T>(ob: Observer<T>) => _InternalMarkObserver<T> }
-) => void;
+) => void | CleanUpFn;
 
 const signature = Math.random().toString(32).slice(2);
 
@@ -116,27 +124,40 @@ function createObservable<T>(observable: ObservableFn<T>) {
     //valueof() unwrapped the real observer fn provided during observe time
     _subscribers[type].set(ob.valueOf(), ob);
     return selfRefence<TerminateOption>((ref) => {
-      function revokeAccess() {
-        const _self = ref();
-        _self.unsubscribe = noop;
-        _self.stop = noop;
+      function _revokeSelfOnDisconnect<T extends object>(target: T) {
+        function revokeAccess() {
+          const _self = ref();
+          _self.unsubscribe = noop;
+          _self.stop = noop;
+        }
+        return new Proxy(target, {
+          get(target, key) {
+            const value = Reflect.get(target, key);
+            if (typeof value === 'function') {
+              return function (this: any, ...args: any) {
+                let result = Reflect.apply(value, this, args);
+                return revokeAccess(), result;
+              };
+            }
+            return value;
+          },
+        });
       }
 
-      return {
+      return _revokeSelfOnDisconnect({
         stop: () => {
           _stop();
-          revokeAccess();
         },
         unsubscribe() {
           removeSubscriber(ob, type);
-          revokeAccess();
         },
-      };
+      });
     });
   }
 
   function wrappedObserverInStore(ob: Observer<T>) {
     let isAlreadyWrapped = false;
+
     _subscribers.subsriberEntries.forEach((sub) => {
       isAlreadyWrapped = sub.valueOf() === ob;
     });
@@ -167,7 +188,14 @@ function createObservable<T>(observable: ObservableFn<T>) {
           }
 
           reset(function () {
-            queue.clear();
+            queue.flush(() => {
+              return new Promise((res) => {
+                map(value, function (value) {
+                  res(undefined);
+                  next(value);
+                });
+              });
+            });
             unsubscribe();
           });
         })
@@ -184,7 +212,8 @@ function createObservable<T>(observable: ObservableFn<T>) {
   };
 
   function batchNofication(value: T) {
-    Promise.resolve().then(() => {
+    //queuemicroTask before UI rendering(i.e change app state before UI render)
+    microQueueTaskNative(() => {
       _subscribers.subsriberEntries.forEach((subscriber) => {
         subscriber(value);
       });
@@ -195,12 +224,13 @@ function createObservable<T>(observable: ObservableFn<T>) {
     notifier: Observer<T> | MarkObserveFn<T, MARK_OBSERVER_TYPE>
   ) {
     if (_subscribers.subsriberEntries.size === 0) {
-      observable(
+      let hasSetCleanUpFnUsingReturnValue = false;
+      const cleanUpFn = observable(
         function (value) {
           notify(value);
         },
         function (reset) {
-          _resetInternalFn = reset;
+          if (!hasSetCleanUpFnUsingReturnValue) _resetInternalFn = reset;
         },
         {
           _markObInternal: function <T>(ob: Observer<T>) {
@@ -211,6 +241,11 @@ function createObservable<T>(observable: ObservableFn<T>) {
           },
         }
       );
+
+      if (!_resetInternalFn && cleanUpFn) {
+        _resetInternalFn = cleanUpFn;
+        hasSetCleanUpFnUsingReturnValue = true;
+      }
     }
     return _registerObserver(
       'type' in notifier ? notifier : _markObserver(notifier, EXTERNAL_OBSERVER)

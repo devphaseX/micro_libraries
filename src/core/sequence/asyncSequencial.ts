@@ -29,10 +29,6 @@ type DoneOption<Args, Shared> = {
   passAlonged: Args;
 };
 
-type DoneCase<Args, Shared> = (
-  input: DoneOption<Args, Shared>['passAlonged']
-) => void;
-
 interface PayloadBasedError<Shared> extends Error {
   payload: AsyncTaskEntry<any, Shared, any>;
 }
@@ -107,20 +103,25 @@ function createAsyncBlockQueue<S extends object>(
             next(errorWithPayload);
           });
         };
+
+        function createTaskEntryOption(): AsyncTaskEntryOption {
+          return { wait };
+        }
         try {
           const taskArity = task.function.length;
+          const option = createTaskEntryOption();
           let result;
           switch (taskArity) {
             case 1: {
-              result = task.function({ wait });
+              result = task.function(option);
               break;
             }
             case 2: {
-              result = task.function(previousData, { wait });
+              result = task.function(previousData, option);
               break;
             }
             default: {
-              result = task.function(previousData, { ...shared }, { wait });
+              result = task.function(previousData, { ...shared }, option);
             }
           }
 

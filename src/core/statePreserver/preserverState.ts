@@ -91,4 +91,5 @@ function safeContext<T>(cb: () => T): SafeContext<T, Error> {
 }
 
 export default preserveState;
-export { SafeContextInitializationError, FailedTaskError };
+
+export { SafeContextInitializationError, FailedTaskError, preserveState };

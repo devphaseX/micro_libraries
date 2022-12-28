@@ -24,11 +24,6 @@ interface AsyncBlockQueueOption<Shared extends object> {
   onerror: (error: any, shared: Shared) => void;
 }
 
-type DoneOption<Args, Shared> = {
-  shared: Shared;
-  passAlonged: Args;
-};
-
 interface PayloadBasedError<Shared> extends Error {
   payload: AsyncTaskEntry<any, Shared, any>;
 }

@@ -1,3 +1,5 @@
+import preserveState from 'core/statePreserver/preserverState';
+
 export function cloneList<T>(list: Array<T>) {
   return list.slice(0);
 }
@@ -49,71 +51,12 @@ export function selfRefence<T>(resulter: (ref: () => T) => T) {
   return res;
 }
 
-type Task = () => void;
+export type Task = () => void;
 
-export function createDataQueue<T>() {
-  let queue: Set<T> = new Set();
-  let isQueueLocked = false;
-
-  function push(value: T) {
-    if (!queue.has(value)) {
-      queue.add(value);
-    }
-  }
-
-  function pop(): T | undefined {
-    const [nextTask] = queue;
-    _removeTask(nextTask);
-    return nextTask;
-  }
-
-  function _removeTask(value: T) {
-    queue.delete(value);
-  }
-
-  function clear() {
-    queue.forEach(_removeTask);
-  }
-
-  function flush(task: (value: T) => void | Promise<void>) {
-    lock();
-    microQueueTaskNative(async () => {
-      try {
-        while (queue.size) {
-          const asyncWaiter = task(pop()!);
-          if (asyncWaiter instanceof Promise) {
-            await asyncWaiter;
-          }
-        }
-      } catch (e) {
-        throw e;
-      } finally {
-        release();
-      }
-    });
-  }
-
-  function lock() {
-    isQueueLocked = true;
-  }
-
-  function release() {
-    isQueueLocked = false;
-  }
-
-  return {
-    pop,
-    push,
-    clear,
-    flush,
-    lock,
-    release,
-    isEmpty: function () {
-      return queue.size === 0;
-    },
-  };
-}
-
+// const queue = createDataQueue();
+// (async function () {})()(async function () {
+//   await queue.awaitLock();
+// })();
 export function microQueueTaskNative(task: Task) {
   Promise.resolve()
     .then(() => task())

@@ -1,5 +1,3 @@
-import preserveState from 'core/statePreserver/preserverState';
-
 export function cloneList<T>(list: Array<T>) {
   return list.slice(0);
 }
@@ -53,10 +51,6 @@ export function selfRefence<T>(resulter: (ref: () => T) => T) {
 
 export type Task = () => void;
 
-// const queue = createDataQueue();
-// (async function () {})()(async function () {
-//   await queue.awaitLock();
-// })();
 export function microQueueTaskNative(task: Task) {
   Promise.resolve()
     .then(() => task())

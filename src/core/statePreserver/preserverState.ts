@@ -79,7 +79,7 @@ function preserveState<T, PreventThrownError extends boolean = boolean>(
       error: resetErrors,
     } as unknown as PreserveResult<T, PreventThrownError>;
   }
-  return workContext.result as PreserveResult<T, PreventThrownError>;
+  return workContext as PreserveResult<T, PreventThrownError>;
 }
 
 function safeContext<T>(cb: () => T): SafeContext<T, Error> {

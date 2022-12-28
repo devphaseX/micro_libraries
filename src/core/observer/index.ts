@@ -1,9 +1,5 @@
-import {
-  createDataQueue,
-  microQueueTaskNative,
-  noop,
-  selfRefence,
-} from '../../util/index.js';
+import { createLockableQueue } from '../lockableQueue/index.js';
+import { microQueueTaskNative, noop, selfRefence } from '../../util/index.js';
 import { ErrorMessage } from './message.js';
 
 type Observer<V> = (value: V) => void;
@@ -166,7 +162,7 @@ function createObservable<T>(observable: ObservableFn<T>) {
 
   function from<U>(map: (value: T, next: Observer<U>) => void) {
     return createObservable<U>((next, reset, { _markObInternal }) => {
-      const queue = createDataQueue<T>();
+      const queue = createLockableQueue<T>();
       let isLocked = false;
 
       const { unsubscribe } = observe(

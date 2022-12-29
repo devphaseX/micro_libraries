@@ -81,3 +81,20 @@ export function repeatedSetTimeout(task: () => void, ms = 0) {
     },
   };
 }
+
+function externalTransitPromise<T>() {
+  let res: (value: T | PromiseLike<T>) => void;
+  let rej: (reason?: unknown) => void;
+  const promise = new Promise<T>((_res, _rej) => {
+    res = _res;
+    rej = _rej;
+  });
+  return { resolve: res!, reject: rej!, promise };
+}
+
+function createPromiseSignal(signal: AbortSignal, reason?: unknown) {
+  const { promise, reject } = externalTransitPromise<void>();
+  signal.addEventListener('abort', () => reject(reason), { once: true });
+  return promise;
+}
+export { externalTransitPromise, createPromiseSignal };

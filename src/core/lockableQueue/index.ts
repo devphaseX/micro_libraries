@@ -1,5 +1,10 @@
-import { microQueueTaskNative } from '../../util/index.js';
+import { createPromiseSignal, microQueueTaskNative } from '../../util/index.js';
 import { preserveState } from '../statePreserver/preserverState.js';
+import {
+  WARN_ABOUT_ACCESS_FN,
+  ERROR_QUEUE_IN_LOCK,
+  REVOCATION_ERROR,
+} from './error_msg.js';
 
 interface _LockOption {
   keyAccess?: string;
@@ -14,6 +19,11 @@ type UseLock<T> = {
     : T[K];
 };
 
+interface ReleaseProcessError {
+  releaser: (isEmpty: boolean) => void;
+  error: unknown;
+}
+
 const accessGrantId = Symbol();
 
 const grantAccess = (key: ReleasePayload['lockKey']) => {
@@ -23,22 +33,33 @@ const grantAccess = (key: ReleasePayload['lockKey']) => {
   return allow;
 };
 
+type GrantAccessFn = ReturnType<typeof grantAccess>;
+
 function createLockableQueue<T>() {
   let queue: Set<T> = new Set();
   let isQueueLocked = false;
-  let isSignalingAwaitingLock = false;
-  const awaitingLockRelease = [] as Array<(isEmpty: boolean) => void>;
+  let isSignalAwaitingLock = false;
+  let awaitingLockFns = [] as Array<(isEmpty: boolean) => void>;
   let releaseLock: string | symbol | null = null;
   let internalLockActive = false;
 
-  function grantLockAccess<T extends Function>(fn: T): T {
+  function grantProtectAccess<T extends Function>(fn: T): T {
     return function (...args: any[]) {
-      const accessFn = args[0] as ReturnType<typeof grantAccess> | undefined;
-      if (!internalLockActive && (!isQueueLocked || accessFn?.(releaseLock))) {
+      const accessFn = args[0] as GrantAccessFn | undefined;
+      if (
+        !internalLockActive &&
+        (!isQueueLocked ||
+          (accessFn &&
+            accessFn.grant === accessGrantId &&
+            accessFn(releaseLock)))
+      ) {
         return fn(...args);
       }
 
-      throw new Error('Queue is currently in locked mode');
+      if (typeof accessFn === 'function') {
+        console.warn(WARN_ABOUT_ACCESS_FN);
+      }
+      throw new Error(ERROR_QUEUE_IN_LOCK);
     } as unknown as T;
   }
 
@@ -82,10 +103,10 @@ function createLockableQueue<T>() {
 
   type LockOption = _LockOption;
   function lock(option?: LockOption) {
-    if (isSignalingAwaitingLock) {
+    if (isSignalAwaitingLock) {
       throw new Error('Acquiring lock failed, queue in lock mode');
     }
-    if (!isSignalingAwaitingLock) isQueueLocked = true;
+    if (!isSignalAwaitingLock) isQueueLocked = true;
 
     const supportSymbol = typeof Symbol === 'function';
     const supportGlobalSymbol =
@@ -108,31 +129,42 @@ function createLockableQueue<T>() {
     releaseLock = null;
     isQueueLocked = false;
     try {
-      isSignalingAwaitingLock = true;
+      isSignalAwaitingLock = true;
 
-      const lockerError = [] as Array<{
-        releaser: (isEmpty: boolean) => void;
-        error: unknown;
-      }>;
+      const lockerError = [] as Array<ReleaseProcessError>;
 
-      for (let releaseFn of awaitingLockRelease) {
-        const context = preserveState(() => releaseFn(isEmpty()), {}, true);
+      for (let awaitLockFn of awaitingLockFns) {
+        const context = preserveState(() => awaitLockFn(isEmpty()), {}, true);
         if (context.isSuccess) continue;
-        lockerError.push({ releaser: releaseFn, error: context.error });
+        lockerError.push({ releaser: awaitLockFn, error: context.error });
       }
 
       if (lockerError.length) throw lockerError;
     } finally {
-      isSignalingAwaitingLock = false;
+      isSignalAwaitingLock = false;
+      awaitingLockFns = [];
     }
   }
 
-  function awaitLockRelease(): Promise<boolean> {
+  function awaitLockRelease(signal?: AbortSignal): Promise<boolean> {
+    let awaitFn: () => void;
     return new Promise<boolean>((res) => {
       if (isQueueLocked) {
-        awaitingLockRelease.push(() => {
-          res(isEmpty());
-        });
+        awaitingLockFns.push(
+          (awaitFn = () => {
+            res(isEmpty());
+          })
+        );
+        if (signal) {
+          signal.addEventListener(
+            'abort',
+            () =>
+              (awaitingLockFns = awaitingLockFns.filter(
+                (lock) => lock !== awaitFn
+              )),
+            { once: true }
+          );
+        }
       } else {
         res(isEmpty());
       }
@@ -155,18 +187,9 @@ function createLockableQueue<T>() {
   async function awaitLockAccess(exitLock?: AbortSignal) {
     if (lockableQueue.isLocked()) {
       await (exitLock
-        ? Promise.all([
-            new Promise((_, rej) => {
-              if (exitLock.aborted)
-                rej('Lock access revoked externally using an abort signal');
-              exitLock.addEventListener(
-                'abort',
-                () =>
-                  rej('Lock access revoked externally using an abort signal'),
-                { once: true }
-              );
-            }),
-            awaitLockRelease(),
+        ? Promise.race([
+            awaitLockRelease(exitLock),
+            createPromiseSignal(exitLock, REVOCATION_ERROR),
           ])
         : awaitLockRelease());
     }
@@ -174,11 +197,11 @@ function createLockableQueue<T>() {
   }
 
   const lockableQueue = {
-    pop: grantLockAccess(pop),
-    push: grantLockAccess(push),
-    clear: grantLockAccess(clear),
-    flush: grantLockAccess(flush),
-    lock: grantLockAccess(lock),
+    pop: grantProtectAccess(pop),
+    push: grantProtectAccess(push),
+    clear: grantProtectAccess(clear),
+    flush: grantProtectAccess(flush),
+    lock: grantProtectAccess(lock),
     isEmpty,
     awaitLock: awaitLockRelease,
     getRelease,
@@ -186,6 +209,7 @@ function createLockableQueue<T>() {
     isLocked() {
       return releaseLock != null;
     },
+    grantAccess,
   };
 
   return lockableQueue as UseLock<typeof lockableQueue>;

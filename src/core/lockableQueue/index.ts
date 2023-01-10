@@ -46,17 +46,20 @@ function createLockableQueue<T>() {
   function grantProtectAccess<T extends Function>(fn: T): T {
     return function (...args: any[]) {
       const accessFn = args[0] as GrantAccessFn | undefined;
+      let argOfFunType = false;
+
       if (
         !internalLockActive &&
         (!isQueueLocked ||
-          (accessFn &&
+          (argOfFunType =
+            typeof accessFn === 'function' &&
             accessFn.grant === accessGrantId &&
             accessFn(releaseLock)))
       ) {
         return fn(...args);
       }
 
-      if (typeof accessFn === 'function') {
+      if (argOfFunType) {
         console.warn(WARN_ABOUT_ACCESS_FN);
       }
       throw new Error(ERROR_QUEUE_IN_LOCK);
@@ -114,8 +117,8 @@ function createLockableQueue<T>() {
 
     if (supportGlobalSymbol && option?.keyAccess) {
       releaseLock = Symbol.for(option.keyAccess);
-    } else if (supportSymbol && option?.keyAccess) {
-      releaseLock = Symbol(option.keyAccess);
+    } else if (supportSymbol) {
+      releaseLock = Symbol();
     } else {
       releaseLock = option?.keyAccess ?? Math.random().toString().slice(2);
     }
@@ -131,7 +134,7 @@ function createLockableQueue<T>() {
     try {
       isSignalAwaitingLock = true;
 
-      const lockerError = [] as Array<ReleaseProcessError>;
+      const lockerError: Array<ReleaseProcessError> = [];
 
       for (let awaitLockFn of awaitingLockFns) {
         const context = preserveState(() => awaitLockFn(isEmpty()), {}, true);
@@ -178,10 +181,8 @@ function createLockableQueue<T>() {
   }
 
   function getRelease(key?: typeof releaseLock): ReleasePayload | null {
-    if (key === releaseLock) {
-      return { lockKey: releaseLock, release: () => release(key) };
-    }
-    return null;
+    if (key !== releaseLock) return null;
+    return { lockKey: releaseLock, release: () => release(key) };
   }
 
   async function awaitLockAccess(exitLock?: AbortSignal) {
